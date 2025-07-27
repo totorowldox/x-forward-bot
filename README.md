@@ -1,4 +1,5 @@
-# nonebot_plugin_x_forward
+# x-forward-bot
+
 
 ## ⚙️ 配置
 
