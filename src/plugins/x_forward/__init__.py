@@ -32,16 +32,26 @@ async def on_startup(bot: Bot):
     login()
     await start_polling()
 
+@driver.on_bot_disconnect
+@driver.on_shutdown
+def on_shutdown():
+    if isinstance(task, asyncio.Task):
+        task.cancel()
+
 def login():
     client.load_cookies('cookies.json')
 
 async def polling_thread(method):
-    while True:
-        await method()
+    try:
+        while True:
+            await method()
 
-        """Add a random delay(100% to 150%)"""
-        factor = (1.5 - 1) * random.random() + 1
-        await asyncio.sleep(plugin_config.interval_seconds * factor)
+            """Add a random delay(100% to 150%)"""
+            factor = (1.5 - 1) * random.random() + 1
+            await asyncio.sleep(plugin_config.interval_seconds * factor)
+    except asyncio.CancelledError:
+        logger.info("Polling thread cancelled")
+        pass
 
 async def get_user_id(username: str):
     if username in username_to_id:
@@ -54,9 +64,8 @@ async def get_user_id(username: str):
 
 async def check_x_update():
     for username in plugin_config.subscribe_x_users:
+        logger.info(f"Checking tweets from @{username}")
         try:
-            logger.info(f"Checking tweets from @{username}")
-
             userid = await get_user_id(username)
 
             """[INFO] count here does not work"""
@@ -65,13 +74,22 @@ async def check_x_update():
                 logger.success(f"Refresh last tweet from @{username}")
                 last_noticed_tweet[userid] = last_tweets[0].id
                 continue
+
+            """Temporarily save last tweet id"""
             temp_last = last_noticed_tweet.get(userid)
+            
+            """Update last tweet id"""
+            last_noticed_tweet[userid] = last_tweets[0].id
+
             for _, last_tweet in enumerate(last_tweets):
                 if last_tweet.id == temp_last:
                     logger.success(f"No more new tweets from @{username}")
                     break
+
                 message = StringIO()
                 logger.success(f"New tweet from @{username}")
+
+                """Create text message"""
                 message.write(f"X: @{username}\n")
                 if last_tweet.retweeted_tweet != None:
                     message.write(f"转发 @{last_tweet.retweeted_tweet.user.screen_name}：\n{last_tweet.retweeted_tweet.full_text}")
@@ -113,13 +131,12 @@ async def check_x_update():
                     await ctx.send_group_forward_msg(group_id=g, messages=msg)
                     logger.success(f"Sending to group {g}")
 
-                """Update last tweet id"""
-                last_noticed_tweet[userid] = last_tweet.id
         except Exception as e:
             logger.error(f"Error checking updates for @{username}: {e}")
 
 async def start_polling():
-    _ = asyncio.create_task(polling_thread(check_x_update))
+    global task
+    task = asyncio.create_task(polling_thread(check_x_update))
 
 def create_text_segment(username: str, text: str):
     return MessageSegment.node_custom(user_id=0, nickname=username, content=Message(text))
